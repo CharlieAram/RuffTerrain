@@ -1,18 +1,37 @@
 @import "tailwindcss";
 
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --panel: #f8fafc;
+  --border: #e2e8f0;
+  --accent: #0891b2;
+}
+
 @theme inline {
-  --color-background: #070b14;
-  --color-foreground: #c8d6e5;
-  --color-panel: #0d1424;
-  --color-border: #1a2744;
-  --color-accent: #06b6d4;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #ffffff;
+    --foreground: #171717;
+    --panel: #f8fafc;
+    --border: #e2e8f0;
+    --accent: #0891b2;
+  }
+}
+
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 @keyframes scan {
@@ -21,6 +40,6 @@ body {
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 6px rgba(6, 182, 212, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(6, 182, 212, 0.8); }
+  0%, 100% { box-shadow: 0 0 6px rgba(8, 145, 178, 0.3); }
+  50% { box-shadow: 0 0 14px rgba(8, 145, 178, 0.6); }
 }

@@ -2,18 +2,12 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import MapGrid, { type CellState } from "./components/MapGrid";
-import VideoFeed from "./components/VideoFeed";
+import VideoFeed, { type PersonDetection } from "./components/VideoFeed";
 
 const ROWS = 16;
 const COLS = 24;
 
-interface Person {
-  x: number;
-  y: number;
-  injured: boolean;
-}
-
-const DEMO_PEOPLE: Person[] = [
+const DEMO_PEOPLE = [
   { x: 6, y: 3, injured: true },
   { x: 19, y: 5, injured: false },
   { x: 11, y: 9, injured: true },
@@ -32,6 +26,9 @@ export default function Home() {
   const [robotPos, setRobotPos] = useState({ x: 0, y: 0 });
   const [demoMode, setDemoMode] = useState(false);
   const demoDir = useRef(1);
+  const robotPosRef = useRef(robotPos);
+  robotPosRef.current = robotPos;
+  const lastCVLog = useRef(0);
 
   const clearRadius = useCallback((cx: number, cy: number) => {
     setGrid((prev) => {
@@ -40,28 +37,67 @@ export default function Home() {
         for (let dx = -1; dx <= 1; dx++) {
           const nx = cx + dx;
           const ny = cy + dy;
-          if (ny >= 0 && ny < ROWS && nx >= 0 && nx < COLS && next[ny][nx] === "danger") {
-            const person = DEMO_PEOPLE.find((p) => p.x === nx && p.y === ny);
-            next[ny][nx] = person
-              ? person.injured ? "person-injured" : "person-ok"
-              : "clear";
+          if (
+            ny >= 0 && ny < ROWS &&
+            nx >= 0 && nx < COLS &&
+            next[ny][nx] === "danger"
+          ) {
+            if (demoMode) {
+              const person = DEMO_PEOPLE.find((p) => p.x === nx && p.y === ny);
+              next[ny][nx] = person
+                ? person.injured ? "person-injured" : "person-ok"
+                : "clear";
+            } else {
+              next[ny][nx] = "clear";
+            }
           }
         }
       }
       return next;
     });
-  }, []);
+  }, [demoMode]);
 
   useEffect(() => {
     clearRadius(robotPos.x, robotPos.y);
   }, [robotPos, clearRadius]);
 
+  // Derive found people from grid state — works for both demo + CV detections
   const foundPeople = useMemo(() => {
-    return DEMO_PEOPLE.filter((p) => {
-      const cell = grid[p.y]?.[p.x];
-      return cell === "person-injured" || cell === "person-ok";
+    const found: { x: number; y: number; injured: boolean }[] = [];
+    grid.forEach((row, y) => {
+      row.forEach((cell, x) => {
+        if (cell === "person-injured") found.push({ x, y, injured: true });
+        else if (cell === "person-ok") found.push({ x, y, injured: false });
+      });
     });
+    return found;
   }, [grid]);
+
+  // CV detection → mark robot's current cell on the grid
+  const handleCVDetection = useCallback((detections: PersonDetection[]) => {
+    const now = Date.now();
+    if (now - lastCVLog.current < 4000) return;
+    lastCVLog.current = now;
+
+    const best = detections.reduce((a, b) =>
+      a.confidence > b.confidence ? a : b
+    );
+    const pos = robotPosRef.current;
+
+    setGrid((prev) => {
+      const next = prev.map((r) => [...r]);
+      const { x, y } = pos;
+      if (
+        y >= 0 && y < ROWS &&
+        x >= 0 && x < COLS &&
+        next[y][x] !== "person-injured" &&
+        next[y][x] !== "person-ok"
+      ) {
+        next[y][x] = best.injured ? "person-injured" : "person-ok";
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -100,9 +136,7 @@ export default function Home() {
           nx = 0;
           ny = prev.y + 2;
         }
-        if (ny >= ROWS) {
-          return prev;
-        }
+        if (ny >= ROWS) return prev;
         return { x: nx, y: ny };
       });
     }, 80);
@@ -124,29 +158,31 @@ export default function Home() {
     <div className="flex flex-col h-screen overflow-hidden font-mono">
       <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-panel shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-tight text-accent">RUFFTERRAIN</span>
+          <span className="text-xl font-bold tracking-tight text-accent">
+            RUFFTERRAIN
+          </span>
           <span className="text-[10px] text-foreground/30 uppercase tracking-[0.2em] hidden sm:inline">
             Search &amp; Rescue Ops
           </span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-foreground/40">ROBOT OFFLINE</span>
+            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+            <span className="text-foreground/50">ROBOT OFFLINE</span>
           </div>
           <button
             onClick={() => setDemoMode((d) => !d)}
             className={`px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer ${
               demoMode
-                ? "border-amber-500/50 text-amber-400 bg-amber-500/10"
-                : "border-border text-foreground/40 hover:text-accent hover:border-accent/50"
+                ? "border-amber-400 text-amber-600 bg-amber-50"
+                : "border-border text-foreground/50 hover:text-accent hover:border-accent"
             }`}
           >
             {demoMode ? "STOP DEMO" : "DEMO"}
           </button>
           <button
             onClick={reset}
-            className="px-3 py-1.5 text-xs rounded border border-border text-foreground/40 hover:text-red-400 hover:border-red-500/50 transition-colors cursor-pointer"
+            className="px-3 py-1.5 text-xs rounded border border-border text-foreground/50 hover:text-red-500 hover:border-red-300 transition-colors cursor-pointer"
           >
             RESET
           </button>
@@ -160,22 +196,22 @@ export default function Home() {
 
         <div className="w-[380px] flex flex-col border-l border-border shrink-0">
           <div className="h-[280px] p-3 shrink-0">
-            <VideoFeed />
+            <VideoFeed onDetection={handleCVDetection} />
           </div>
 
           <div className="flex-1 p-4 border-t border-border overflow-y-auto space-y-5">
             <section>
-              <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
+              <h3 className="text-[10px] text-foreground/40 uppercase tracking-[0.15em] mb-2">
                 Mission Status
               </h3>
               <div className="grid grid-cols-2 gap-2">
-                <Stat label="Cleared" value={`${pct}%`} accent="text-emerald-400" />
-                <Stat label="Scanned" value={`${cleared}/${total}`} accent="text-cyan-400" />
-                <Stat label="People" value={`${foundPeople.length}`} accent="text-sky-400" />
+                <Stat label="Cleared" value={`${pct}%`} accent="text-emerald-600" />
+                <Stat label="Scanned" value={`${cleared}/${total}`} accent="text-cyan-600" />
+                <Stat label="People" value={`${foundPeople.length}`} accent="text-sky-600" />
                 <Stat
                   label="Injured"
                   value={`${foundPeople.filter((p) => p.injured).length}`}
-                  accent="text-red-400"
+                  accent="text-red-500"
                 />
               </div>
               <div className="mt-2 h-1 bg-border rounded-full overflow-hidden">
@@ -187,7 +223,7 @@ export default function Home() {
             </section>
 
             <section>
-              <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
+              <h3 className="text-[10px] text-foreground/40 uppercase tracking-[0.15em] mb-2">
                 Controls
               </h3>
               <div className="flex flex-col items-center gap-1">
@@ -198,14 +234,14 @@ export default function Home() {
                   <Key label="D" sub="&#9654;" />
                 </div>
               </div>
-              <p className="text-[9px] text-foreground/20 text-center mt-2">
+              <p className="text-[9px] text-foreground/30 text-center mt-2">
                 Arrow keys also work
               </p>
             </section>
 
             {foundPeople.length > 0 && (
               <section>
-                <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
+                <h3 className="text-[10px] text-foreground/40 uppercase tracking-[0.15em] mb-2">
                   Detection Log
                 </h3>
                 <div className="space-y-1.5">
@@ -214,8 +250,8 @@ export default function Home() {
                       key={i}
                       className={`flex items-center justify-between px-3 py-2 rounded text-xs border ${
                         p.injured
-                          ? "border-red-900/50 bg-red-950/20 text-red-400"
-                          : "border-emerald-900/50 bg-emerald-950/20 text-emerald-400"
+                          ? "border-red-200 bg-red-50 text-red-600"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-600"
                       }`}
                     >
                       <span>
@@ -236,8 +272,8 @@ export default function Home() {
 
 function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className="px-3 py-2 rounded border border-border bg-background">
-      <div className="text-[9px] text-foreground/30 uppercase">{label}</div>
+    <div className="px-3 py-2 rounded-lg border border-border bg-white">
+      <div className="text-[9px] text-foreground/40 uppercase">{label}</div>
       <div className={`text-base font-bold ${accent}`}>{value}</div>
     </div>
   );
@@ -245,7 +281,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent: 
 
 function Key({ label, sub }: { label: string; sub: string }) {
   return (
-    <div className="w-10 h-10 flex flex-col items-center justify-center rounded border border-border bg-background text-foreground/50">
+    <div className="w-10 h-10 flex flex-col items-center justify-center rounded-lg border border-border bg-white text-foreground/50 shadow-sm">
       <span className="text-[11px] leading-none">{label}</span>
       <span className="text-[8px] leading-none opacity-40">{sub}</span>
     </div>
