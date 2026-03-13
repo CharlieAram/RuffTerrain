@@ -1,27 +1,79 @@
 "use client";
 
-import { MapContainer, TileLayer, Rectangle, CircleMarker, Polygon } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Rectangle,
+  CircleMarker,
+  Polygon,
+  Polyline,
+  Marker,
+} from "react-leaflet";
+import L from "leaflet";
 import type { LatLngBoundsExpression, PathOptions } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { AREA, SEARCH_ZONE, CELL_MASK } from "@/lib/searchZone";
+import { AREA, SEARCH_ZONE, CELL_MASK, TRAILS } from "@/lib/searchZone";
 
-export type CellState = "danger" | "clear" | "person-injured" | "person-ok";
+export type CellState = "unsearched" | "clear";
+
+export interface InjuryPin {
+  id: string;
+  lat: number;
+  lng: number;
+  gridX: number;
+  gridY: number;
+  count: number;
+  timestamp: number;
+}
 
 interface Props {
   grid: CellState[][];
   robotPos: { x: number; y: number };
   rows: number;
   cols: number;
+  injuries: InjuryPin[];
+  onPinClick?: (id: string) => void;
 }
 
 const CELL_STYLE: Record<CellState, PathOptions> = {
-  danger: { color: "transparent", fillColor: "#dc2626", fillOpacity: 0.20, weight: 0 },
-  clear: { color: "transparent", fillColor: "#22c55e", fillOpacity: 0.12, weight: 0 },
-  "person-injured": { color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.50, weight: 1.5 },
-  "person-ok": { color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.40, weight: 1.5 },
+  unsearched: {
+    color: "#ef4444",
+    fillColor: "#ef4444",
+    fillOpacity: 0.18,
+    weight: 0.5,
+    opacity: 0.2,
+  },
+  clear: {
+    color: "transparent",
+    fillColor: "#22c55e",
+    fillOpacity: 0.22,
+    weight: 0,
+  },
 };
 
-export default function SearchMap({ grid, robotPos, rows, cols }: Props) {
+const injuryIcon = L.divIcon({
+  className: "",
+  html: `<div style="
+    width:28px;height:28px;
+    background:radial-gradient(circle,#ef4444 40%,transparent 70%);
+    border:2px solid #fca5a5;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:14px;color:white;
+    box-shadow:0 0 12px rgba(239,68,68,0.7);
+    cursor:pointer;
+  ">⚠</div>`,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+});
+
+export default function SearchMap({
+  grid,
+  robotPos,
+  rows,
+  cols,
+  injuries,
+  onPinClick,
+}: Props) {
   const cellW = (AREA.east - AREA.west) / cols;
   const cellH = (AREA.north - AREA.south) / rows;
 
@@ -38,21 +90,39 @@ export default function SearchMap({ grid, robotPos, rows, cols }: Props) {
   return (
     <MapContainer
       center={center}
-      zoom={14}
+      zoom={19}
       style={{ height: "100%", width: "100%" }}
       zoomControl={false}
       attributionControl={false}
     >
-      <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+      <TileLayer
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        maxZoom={20}
+      />
+
+      {/* Trail / fire-road paths */}
+      {TRAILS.map((trail, i) => (
+        <Polyline
+          key={`trail-${i}`}
+          positions={trail}
+          pathOptions={{
+            color: "#fbbf24",
+            weight: 2,
+            opacity: 0.5,
+            dashArray: "6 4",
+          }}
+        />
+      ))}
 
       {/* Search zone perimeter */}
       <Polygon
         positions={SEARCH_ZONE}
         pathOptions={{
           color: "#f97316",
-          weight: 2.5,
+          weight: 2,
           fill: false,
-          opacity: 0.85,
+          opacity: 0.7,
+          dashArray: "8 4",
         }}
       />
 
@@ -71,18 +141,28 @@ export default function SearchMap({ grid, robotPos, rows, cols }: Props) {
               pathOptions={CELL_STYLE[cell]}
             />
           );
-        })
+        }),
       )}
+
+      {/* Injury pins */}
+      {injuries.map((pin) => (
+        <Marker
+          key={pin.id}
+          position={[pin.lat, pin.lng]}
+          icon={injuryIcon}
+          eventHandlers={{ click: () => onPinClick?.(pin.id) }}
+        />
+      ))}
 
       {/* Robot marker */}
       <CircleMarker
         center={robotLatLng}
-        radius={7}
+        radius={8}
         pathOptions={{
           color: "#22d3ee",
           fillColor: "#22d3ee",
           fillOpacity: 0.9,
-          weight: 2,
+          weight: 3,
         }}
       />
     </MapContainer>

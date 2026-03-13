@@ -1,7 +1,5 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  serverExternalPackages: ["@tensorflow/tfjs", "@tensorflow-models/coco-ssd"],
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

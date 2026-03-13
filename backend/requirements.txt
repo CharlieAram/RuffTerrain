@@ -1,0 +1,10 @@
+cyberwave>=0.3.31
+numpy>=1.26.0
+opencv-python>=4.8.0
+python-dotenv>=1.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+ultralytics>=8.3.0
+joblib>=1.4.0
+scikit-learn>=1.5.0
+websockets>=13.0
