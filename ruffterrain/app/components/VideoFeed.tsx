@@ -1,165 +1,249 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState } from "react";
 
-interface Detection {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  label: string;
+export interface PersonDetection {
   confidence: number;
   injured: boolean;
+  bbox: { x: number; y: number; w: number; h: number };
 }
 
-interface VideoFeedProps {
-  personDetected?: boolean;
-  posture?: string;
+interface CocoSsdPrediction {
+  class: string;
+  score: number;
+  bbox: [number, number, number, number];
 }
 
-const MOCK_SEQUENCE: (Detection | null)[] = [
-  null,
-  null,
-  { x: 60, y: 40, w: 100, h: 150, label: "Person", confidence: 0.92, injured: false },
-  { x: 60, y: 40, w: 100, h: 150, label: "Person", confidence: 0.94, injured: false },
-  null,
-  null,
-  { x: 130, y: 30, w: 90, h: 140, label: "Person", confidence: 0.87, injured: true },
-  { x: 130, y: 30, w: 90, h: 140, label: "Person", confidence: 0.89, injured: true },
-  null,
-  null,
-];
+interface Props {
+  onDetection?: (detections: PersonDetection[]) => void;
+}
 
-export default function VideoFeed({ personDetected, posture }: VideoFeedProps) {
+export default function VideoFeed({ onDetection }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [detection, setDetection] = useState<Detection | null>(null);
+  const modelRef = useRef<{ detect: (video: HTMLVideoElement) => Promise<CocoSsdPrediction[]> } | null>(null);
+  const animRef = useRef<number>(0);
+  const lastDetectTime = useRef(0);
+  const onDetectionRef = useRef(onDetection);
+  onDetectionRef.current = onDetection;
+
+  const [modelStatus, setModelStatus] = useState<"loading" | "ready" | "error">("loading");
   const [hasCamera, setHasCamera] = useState(false);
-  const seqIdx = useRef(0);
+  const [detectionCount, setDetectionCount] = useState(0);
+  const [hasInjured, setHasInjured] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await import("@tensorflow/tfjs");
+        const cocoSsd = await import("@tensorflow-models/coco-ssd");
+        const model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+        if (!cancelled) {
+          modelRef.current = model;
+          setModelStatus("ready");
+        }
+      } catch (e) {
+        console.error("[CV] Model load failed:", e);
+        if (!cancelled) setModelStatus("error");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     navigator.mediaDevices
-      ?.getUserMedia({ video: { width: 400, height: 300 } })
+      ?.getUserMedia({ video: true })
       .then((stream) => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           setHasCamera(true);
         }
       })
-      .catch(() => setHasCamera(false));
+      .catch((err) => {
+        console.error("[Camera] getUserMedia failed:", err);
+        setHasCamera(false);
+      });
   }, []);
 
   useEffect(() => {
-    if (personDetected !== undefined) {
-      if (personDetected) {
-        setDetection({
-          x: 80, y: 30, w: 110, h: 160,
-          label: posture === "prone" ? "Person (Prone)" : "Person",
-          confidence: 0.93,
-          injured: posture === "prone" || posture === "supine",
-        });
-      } else {
-        setDetection(null);
+    if (modelStatus !== "ready" || !hasCamera) return;
+
+    const detect = async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const model = modelRef.current;
+
+      if (!video || !canvas || !model || video.readyState < 2) {
+        animRef.current = requestAnimationFrame(detect);
+        return;
       }
-      return;
-    }
 
-    const interval = setInterval(() => {
-      setDetection(MOCK_SEQUENCE[seqIdx.current % MOCK_SEQUENCE.length]);
-      seqIdx.current++;
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [personDetected, posture]);
+      const now = performance.now();
+      if (now - lastDetectTime.current < 150) {
+        animRef.current = requestAnimationFrame(detect);
+        return;
+      }
+      lastDetectTime.current = now;
 
-  const drawOverlay = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+      try {
+        const predictions = await model.detect(video);
+        const people = predictions.filter(
+          (p) => p.class === "person" && p.score > 0.45
+        );
 
-    const w = canvas.offsetWidth;
-    const h = canvas.offsetHeight;
-    canvas.width = w * 2;
-    canvas.height = h * 2;
-    ctx.scale(2, 2);
-    ctx.clearRect(0, 0, w, h);
+        const cw = canvas.offsetWidth;
+        const ch = canvas.offsetHeight;
+        canvas.width = cw * 2;
+        canvas.height = ch * 2;
+        const ctx = canvas.getContext("2d")!;
+        ctx.scale(2, 2);
+        ctx.clearRect(0, 0, cw, ch);
 
-    if (!detection) return;
+        const scaleX = cw / video.videoWidth;
+        const scaleY = ch / video.videoHeight;
+        const detections: PersonDetection[] = [];
 
-    const color = detection.injured ? "#ef4444" : "#22c55e";
-    const bLen = 14;
+        for (const pred of people) {
+          const [bx, by, bw, bh] = pred.bbox;
+          const sx = bx * scaleX;
+          const sy = by * scaleY;
+          const sw = bw * scaleX;
+          const sh = bh * scaleY;
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeRect(detection.x, detection.y, detection.w, detection.h);
+          const injured = bw / bh > 0.95;
 
-    ctx.setLineDash([]);
-    ctx.lineWidth = 2.5;
-    const corners = [
-      [detection.x, detection.y, 1, 1],
-      [detection.x + detection.w, detection.y, -1, 1],
-      [detection.x, detection.y + detection.h, 1, -1],
-      [detection.x + detection.w, detection.y + detection.h, -1, -1],
-    ];
-    for (const [cx, cy, dx, dy] of corners) {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + bLen * dy);
-      ctx.lineTo(cx, cy);
-      ctx.lineTo(cx + bLen * dx, cy);
-      ctx.stroke();
-    }
+          detections.push({
+            confidence: pred.score,
+            injured,
+            bbox: { x: sx, y: sy, w: sw, h: sh },
+          });
 
-    const text = `${detection.label} · ${detection.injured ? "DOWN" : "OK"} · ${(detection.confidence * 100).toFixed(0)}%`;
-    ctx.font = "bold 10px monospace";
-    const tw = ctx.measureText(text).width;
-    ctx.fillStyle = color;
-    ctx.fillRect(detection.x, detection.y - 18, tw + 10, 16);
-    ctx.fillStyle = "#fff";
-    ctx.fillText(text, detection.x + 5, detection.y - 6);
-  }, [detection]);
+          drawDetectionBox(ctx, sx, sy, sw, sh, injured, pred.score);
+        }
 
-  useEffect(() => {
-    drawOverlay();
-  }, [drawOverlay]);
+        setDetectionCount(detections.length);
+        setHasInjured(detections.some((d) => d.injured));
+
+        if (detections.length > 0) {
+          onDetectionRef.current?.(detections);
+        }
+      } catch {
+        // skip frame on error
+      }
+
+      animRef.current = requestAnimationFrame(detect);
+    };
+
+    animRef.current = requestAnimationFrame(detect);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [modelStatus, hasCamera]);
 
   return (
-    <div className="relative h-full bg-panel rounded-lg border border-border overflow-hidden flex flex-col">
+    <div className="relative h-full bg-white rounded-xl border border-border overflow-hidden flex flex-col shadow-sm">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <span className="text-[10px] font-mono text-accent/60 uppercase tracking-widest">
-          Robot Camera — CV Active
+        <span className="text-[10px] font-mono text-accent uppercase tracking-widest">
+          Camera — CV{" "}
+          {modelStatus === "ready"
+            ? "Active"
+            : modelStatus === "loading"
+              ? "Loading\u2026"
+              : "Error"}
         </span>
         <span
-          className={`text-[10px] font-mono ${detection ? "text-amber-400" : "text-foreground/30"}`}
+          className={`text-[10px] font-mono ${
+            detectionCount > 0 ? "text-amber-600" : "text-foreground/30"
+          }`}
         >
-          {detection ? "● DETECTION" : "○ SCANNING"}
+          {detectionCount > 0
+            ? `● ${detectionCount} DETECTED`
+            : "○ SCANNING"}
         </span>
       </div>
-      <div className="relative flex-1 bg-black overflow-hidden">
-        {hasCamera ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-          />
-        ) : (
+
+      <div className="relative flex-1 bg-zinc-900 overflow-hidden">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className={`w-full h-full object-cover ${hasCamera ? "" : "hidden"}`}
+        />
+
+        {!hasCamera && (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="text-xs font-mono text-foreground/20">
+            <span className="text-xs font-mono text-zinc-500">
               AWAITING CAMERA FEED
             </span>
           </div>
         )}
+
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full pointer-events-none"
         />
+
+        {modelStatus === "loading" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <span className="text-xs font-mono text-cyan-300 animate-pulse">
+              Loading CV Model&hellip;
+            </span>
+          </div>
+        )}
+
         <div
           className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent pointer-events-none"
           style={{ animation: "scan 3s linear infinite" }}
         />
+
+        {hasInjured && (
+          <div className="absolute bottom-0 inset-x-0 px-4 py-1.5 bg-red-600/90 text-white text-[10px] font-mono text-center uppercase tracking-wider animate-pulse">
+            ⚠ Injured Person Detected
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function drawDetectionBox(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  injured: boolean,
+  score: number
+) {
+  const color = injured ? "#ef4444" : "#22c55e";
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.setLineDash([]);
+  ctx.lineWidth = 2.5;
+  const bLen = Math.min(14, w * 0.2, h * 0.2);
+  const corners: [number, number, number, number][] = [
+    [x, y, 1, 1],
+    [x + w, y, -1, 1],
+    [x, y + h, 1, -1],
+    [x + w, y + h, -1, -1],
+  ];
+  for (const [cx, cy, dx, dy] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + bLen * dy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + bLen * dx, cy);
+    ctx.stroke();
+  }
+
+  const label = `${injured ? "INJURED" : "OK"} ${(score * 100).toFixed(0)}%`;
+  ctx.font = "bold 10px monospace";
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = color + "cc";
+  ctx.fillRect(x, y - 18, tw + 10, 16);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, x + 5, y - 6);
 }
