@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import MapGrid, { type CellState } from "./components/MapGrid";
 import VideoFeed from "./components/VideoFeed";
+import { useCyberwave, type SafeScoutStatus } from "./hooks/useCyberwave";
 
 const ROWS = 16;
 const COLS = 24;
@@ -27,11 +28,52 @@ function initGrid(): CellState[][] {
   );
 }
 
+const RISK_COLORS: Record<string, string> = {
+  safe: "text-emerald-400",
+  low: "text-emerald-400",
+  elevated: "text-amber-400",
+  medium: "text-amber-400",
+  caution: "text-amber-400",
+  high: "text-red-400",
+  unsafe: "text-red-400",
+  none: "text-foreground/30",
+};
+
+const RISK_BG: Record<string, string> = {
+  safe: "border-emerald-900/50 bg-emerald-950/20",
+  low: "border-emerald-900/50 bg-emerald-950/20",
+  elevated: "border-amber-900/50 bg-amber-950/20",
+  medium: "border-amber-900/50 bg-amber-950/20",
+  caution: "border-amber-900/50 bg-amber-950/20",
+  high: "border-red-900/50 bg-red-950/20",
+  unsafe: "border-red-900/50 bg-red-950/20",
+};
+
+function getRecommendationText(status: SafeScoutStatus): string {
+  if (status.recommendation === "unsafe") {
+    const parts: string[] = [];
+    if (status.personDetected) parts.push("Downed person detected.");
+    if (status.gasLevel === "high") parts.push(`Carbon monoxide elevated (${status.coReading} ppm).`);
+    if (status.thermalRisk === "high") parts.push("Thermal hotspot nearby.");
+    parts.push("Area unsafe for medic entry.");
+    return parts.join(" ");
+  }
+  if (status.recommendation === "caution") {
+    const parts: string[] = [];
+    if (status.personDetected) parts.push(`Person detected (${status.posture}).`);
+    parts.push("Proceed with caution.");
+    return parts.join(" ");
+  }
+  return "No threats detected. Area safe for responder entry.";
+}
+
 export default function Home() {
   const [grid, setGrid] = useState(initGrid);
   const [robotPos, setRobotPos] = useState({ x: 0, y: 0 });
   const [demoMode, setDemoMode] = useState(false);
   const demoDir = useRef(1);
+  const { status, telemetry, mqttConnected, runSimulation } = useCyberwave();
+  const simCleanup = useRef<(() => void) | null>(null);
 
   const clearRadius = useCallback((cx: number, cy: number) => {
     setGrid((prev) => {
@@ -115,25 +157,42 @@ export default function Home() {
 
   const reset = () => {
     setDemoMode(false);
+    if (simCleanup.current) simCleanup.current();
     setGrid(initGrid());
     setRobotPos({ x: 0, y: 0 });
     demoDir.current = 1;
   };
 
+  const handleSimulate = () => {
+    if (simCleanup.current) simCleanup.current();
+    simCleanup.current = runSimulation();
+  };
+
+  const connectionLabel = mqttConnected ? "CYBERWAVE LIVE" : "OFFLINE";
+  const connectionColor = mqttConnected ? "bg-emerald-500" : "bg-red-500";
+
   return (
     <div className="flex flex-col h-screen overflow-hidden font-mono">
       <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-panel shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-tight text-accent">RUFFTERRAIN</span>
+          <span className="text-xl font-bold tracking-tight text-accent">SAFESCOUT</span>
           <span className="text-[10px] text-foreground/30 uppercase tracking-[0.2em] hidden sm:inline">
-            Search &amp; Rescue Ops
+            Pre-Entry Safety Recon
           </span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-foreground/40">ROBOT OFFLINE</span>
+            <span className={`w-2 h-2 rounded-full ${connectionColor} ${mqttConnected ? "" : "animate-pulse"}`} />
+            <span className="text-foreground/40">{connectionLabel}</span>
           </div>
+          {!mqttConnected && (
+            <button
+              onClick={handleSimulate}
+              className="px-3 py-1.5 text-xs rounded border border-amber-500/50 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors cursor-pointer"
+            >
+              SIMULATE
+            </button>
+          )}
           <button
             onClick={() => setDemoMode((d) => !d)}
             className={`px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer ${
@@ -160,13 +219,55 @@ export default function Home() {
 
         <div className="w-[380px] flex flex-col border-l border-border shrink-0">
           <div className="h-[280px] p-3 shrink-0">
-            <VideoFeed />
+            <VideoFeed personDetected={status.personDetected} posture={status.posture} />
           </div>
 
           <div className="flex-1 p-4 border-t border-border overflow-y-auto space-y-5">
+            {/* SafeScout Mission Status */}
             <section>
               <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
                 Mission Status
+              </h3>
+              <div className="space-y-2">
+                <HazardRow
+                  label="Person Down"
+                  value={status.personDetected ? `YES — ${status.posture}` : "NO"}
+                  level={status.personDetected ? "high" : "safe"}
+                />
+                <HazardRow
+                  label="Chemical Hazard"
+                  value={`${status.gasLevel.toUpperCase()} — CO: ${status.coReading} ppm / CH₄: ${status.methaneReading}%`}
+                  level={status.gasLevel}
+                />
+                <HazardRow
+                  label="Thermal Hazard"
+                  value={status.thermalRisk.toUpperCase()}
+                  level={status.thermalRisk}
+                />
+              </div>
+            </section>
+
+            {/* Entry Recommendation */}
+            <section>
+              <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
+                Entry Recommendation
+              </h3>
+              <div className={`px-4 py-3 rounded border ${RISK_BG[status.recommendation] ?? "border-border"}`}>
+                <div className={`text-sm font-bold uppercase ${RISK_COLORS[status.recommendation]}`}>
+                  {status.recommendation === "unsafe" ? "DO NOT ENTER" :
+                   status.recommendation === "caution" ? "PROCEED WITH CAUTION" :
+                   "AREA CLEAR"}
+                </div>
+                <p className="text-[11px] text-foreground/50 mt-1 leading-relaxed">
+                  {getRecommendationText(status)}
+                </p>
+              </div>
+            </section>
+
+            {/* Map scan progress */}
+            <section>
+              <h3 className="text-[10px] text-foreground/30 uppercase tracking-[0.15em] mb-2">
+                Scan Progress
               </h3>
               <div className="grid grid-cols-2 gap-2">
                 <Stat label="Cleared" value={`${pct}%`} accent="text-emerald-400" />
@@ -230,6 +331,17 @@ export default function Home() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HazardRow({ label, value, level }: { label: string; value: string; level: string }) {
+  return (
+    <div className={`flex items-center justify-between px-3 py-2.5 rounded border ${RISK_BG[level] ?? "border-border bg-background"}`}>
+      <span className="text-[11px] text-foreground/50 uppercase">{label}</span>
+      <span className={`text-xs font-bold ${RISK_COLORS[level] ?? "text-foreground/40"}`}>
+        {value}
+      </span>
     </div>
   );
 }

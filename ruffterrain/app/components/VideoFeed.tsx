@@ -12,6 +12,11 @@ interface Detection {
   injured: boolean;
 }
 
+interface VideoFeedProps {
+  personDetected?: boolean;
+  posture?: string;
+}
+
 const MOCK_SEQUENCE: (Detection | null)[] = [
   null,
   null,
@@ -20,13 +25,12 @@ const MOCK_SEQUENCE: (Detection | null)[] = [
   null,
   null,
   { x: 130, y: 30, w: 90, h: 140, label: "Person", confidence: 0.87, injured: true },
-  { x: 130, y: 30, w: 90, h: 140, label: "Person", confidence: 0.91, injured: true },
   { x: 130, y: 30, w: 90, h: 140, label: "Person", confidence: 0.89, injured: true },
   null,
   null,
 ];
 
-export default function VideoFeed() {
+export default function VideoFeed({ personDetected, posture }: VideoFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [detection, setDetection] = useState<Detection | null>(null);
@@ -46,12 +50,26 @@ export default function VideoFeed() {
   }, []);
 
   useEffect(() => {
+    if (personDetected !== undefined) {
+      if (personDetected) {
+        setDetection({
+          x: 80, y: 30, w: 110, h: 160,
+          label: posture === "prone" ? "Person (Prone)" : "Person",
+          confidence: 0.93,
+          injured: posture === "prone" || posture === "supine",
+        });
+      } else {
+        setDetection(null);
+      }
+      return;
+    }
+
     const interval = setInterval(() => {
       setDetection(MOCK_SEQUENCE[seqIdx.current % MOCK_SEQUENCE.length]);
       seqIdx.current++;
     }, 1500);
     return () => clearInterval(interval);
-  }, []);
+  }, [personDetected, posture]);
 
   const drawOverlay = useCallback(() => {
     const canvas = canvasRef.current;
@@ -92,7 +110,7 @@ export default function VideoFeed() {
       ctx.stroke();
     }
 
-    const text = `${detection.label} · ${detection.injured ? "INJURED" : "OK"} · ${(detection.confidence * 100).toFixed(0)}%`;
+    const text = `${detection.label} · ${detection.injured ? "DOWN" : "OK"} · ${(detection.confidence * 100).toFixed(0)}%`;
     ctx.font = "bold 10px monospace";
     const tw = ctx.measureText(text).width;
     ctx.fillStyle = color;
