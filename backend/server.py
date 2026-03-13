@@ -24,8 +24,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 from dotenv import load_dotenv
+import requests as http_requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
 CV_MODEL_DIR = ROOT / "cv_model"
@@ -181,6 +184,106 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+SMALLEST_TTS_URL = "https://api.smallest.ai/waves/v1/lightning-v2/get_speech"
+
+DUMMY_NEWS = {
+    "headline": "Wildfire intensifies in Temescal Canyon — deploy more search robots recommended",
+    "summary": (
+        "Authorities report the Temescal Canyon wildfire has grown by 800 acres "
+        "overnight. Evacuation orders expanded to zones B-7 through B-12. "
+        "Search-and-rescue teams are urged to deploy additional robotic units "
+        "to cover the widening perimeter."
+    ),
+    "severity": "critical",
+    "source": "default",
+    "search_zone_expanded": True,
+}
+
+
+@app.get("/api/news")
+async def news_endpoint():
+    api_key = os.getenv("SCRAPEGRAPH_API_KEY", "")
+    if not api_key:
+        print("[news] No SCRAPEGRAPH_API_KEY — returning dummy data")
+        return DUMMY_NEWS
+
+    try:
+        from scrapegraph_py import Client
+
+        client = Client(api_key=api_key)
+        response = client.smartscraper(
+            website_url="https://www.fire.ca.gov/incidents",
+            user_prompt=(
+                "Extract the most recent and urgent wildfire incident. "
+                "Return a JSON object with keys: headline (string, short title), "
+                "summary (string, 1-2 sentence description of the situation), "
+                "severity (string, one of: critical, high, moderate, low)."
+            ),
+        )
+        client.close()
+
+        if response and isinstance(response, dict) and response.get("result"):
+            result = response["result"]
+            if isinstance(result, str):
+                import ast
+                try:
+                    result = ast.literal_eval(result)
+                except Exception:
+                    result = json.loads(result)
+
+            return {
+                "headline": result.get("headline", DUMMY_NEWS["headline"]),
+                "summary": result.get("summary", DUMMY_NEWS["summary"]),
+                "severity": result.get("severity", "high"),
+                "source": "scrapegraph",
+                "search_zone_expanded": True,
+            }
+
+        print("[news] ScrapeGraph returned empty — using dummy data")
+        return DUMMY_NEWS
+
+    except Exception as e:
+        print(f"[news] ScrapeGraph error: {e} — returning dummy data")
+        return DUMMY_NEWS
+
+
+class TTSRequest(BaseModel):
+    text: str = "Do you need assistance?"
+    voice_id: str = "alice"
+
+
+@app.post("/api/tts")
+async def tts_endpoint(req: TTSRequest):
+    api_key = os.getenv("SMALLEST_API_KEY", "")
+    if not api_key:
+        return Response(content=b"", media_type="audio/wav", status_code=503)
+
+    try:
+        resp = http_requests.post(
+            SMALLEST_TTS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": req.text,
+                "voice_id": req.voice_id,
+                "sample_rate": 24000,
+                "speed": 1.0,
+                "language": "en",
+                "output_format": "wav",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            print(f"[tts] smallest.ai returned {resp.status_code}: {resp.text}")
+            return Response(content=b"", media_type="audio/wav", status_code=502)
+        return Response(content=resp.content, media_type="audio/wav")
+    except Exception as e:
+        print(f"[tts] Error: {e}")
+        return Response(content=b"", media_type="audio/wav", status_code=502)
 
 
 @app.websocket("/ws")

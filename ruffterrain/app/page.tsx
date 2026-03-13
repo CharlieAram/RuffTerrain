@@ -4,32 +4,60 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import type { CellState, InjuryPin } from "./components/SearchMap";
 import VideoFeed from "./components/VideoFeed";
+import NewsAlert from "./components/NewsAlert";
 import { useBackend } from "./hooks/useBackend";
 import { useCyberwave } from "./hooks/useCyberwave";
-import { ROWS, COLS, CELL_MASK, ACTIVE_CELLS, AREA } from "@/lib/searchZone";
+import {
+  ROWS,
+  COLS,
+  CELL_MASK,
+  ACTIVE_CELLS,
+  AREA,
+  DEMO_CLEARED,
+} from "@/lib/searchZone";
 
 const SearchMap = dynamic(() => import("./components/SearchMap"), {
   ssr: false,
 });
 
 function initGrid(): CellState[][] {
-  return Array.from({ length: ROWS }, () =>
+  const grid = Array.from({ length: ROWS }, () =>
     Array.from({ length: COLS }, (): CellState => "unsearched"),
   );
+  for (const [x, y] of DEMO_CLEARED) {
+    if (y < ROWS && x < COLS && CELL_MASK[y]?.[x]) {
+      grid[y][x] = "clear";
+    }
+  }
+  return grid;
 }
 
 const CELL_SIZE_M = 5;
 let pinIdCounter = 0;
 
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+
 export default function Home() {
   const [grid, setGrid] = useState(initGrid);
-  const [robotPos, setRobotPos] = useState({ x: 3, y: 2 });
+  const [robotPos, setRobotPos] = useState({ x: 5, y: 5 });
+  const [robotDir, setRobotDir] = useState<"n" | "s" | "e" | "w">("n");
   const [injuries, setInjuries] = useState<InjuryPin[]>([]);
   const [selectedPin, setSelectedPin] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [cameraOn, setCameraOn] = useState(true);
+
+  // Voice interaction state
+  const [voiceStatus, setVoiceStatus] = useState<
+    "idle" | "speaking" | "listening" | "responding" | "done"
+  >("idle");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const voiceCooldown = useRef(false);
+
   const robotPosRef = useRef(robotPos);
   robotPosRef.current = robotPos;
+  const robotDirRef = useRef(robotDir);
+  robotDirRef.current = robotDir;
   const lastDetectionTime = useRef(0);
 
   const backend = useBackend();
@@ -52,35 +80,125 @@ export default function Home() {
     }
   }, [mqttConnected, telemetry]);
 
-  // --- Clear cells around robot ---
-  const clearRadius = useCallback((cx: number, cy: number) => {
+  // --- Clear the single cell the robot occupies ---
+  const clearCell = useCallback((cx: number, cy: number) => {
     setGrid((prev) => {
+      if (
+        cy < 0 || cy >= ROWS || cx < 0 || cx >= COLS ||
+        !CELL_MASK[cy]?.[cx] || prev[cy][cx] === "clear"
+      ) return prev;
       const next = prev.map((r) => [...r]);
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (
-            ny >= 0 &&
-            ny < ROWS &&
-            nx >= 0 &&
-            nx < COLS &&
-            CELL_MASK[ny]?.[nx] &&
-            next[ny][nx] === "unsearched"
-          ) {
-            next[ny][nx] = "clear";
-          }
-        }
-      }
+      next[cy][cx] = "clear";
       return next;
     });
   }, []);
 
   useEffect(() => {
-    clearRadius(robotPos.x, robotPos.y);
-  }, [robotPos, clearRadius]);
+    clearCell(robotPos.x, robotPos.y);
+  }, [robotPos, clearCell]);
 
-  // --- Handle CV detections → injury pins ---
+  // --- Voice interaction: TTS + STT + response ---
+  const playTTS = useCallback(async (text: string) => {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await new Promise<void>((resolve) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          audio.play().catch(() => resolve());
+        });
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      /* TTS unavailable */
+    }
+  }, []);
+
+  const listenSTT = useCallback((): Promise<string> => {
+    return new Promise((resolve) => {
+      const SpeechRecognition =
+        (window as /* eslint-disable-line @typescript-eslint/no-explicit-any */ any)
+          .SpeechRecognition ||
+        (window as /* eslint-disable-line @typescript-eslint/no-explicit-any */ any)
+          .webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        resolve("(speech recognition not supported in this browser)");
+        return;
+      }
+
+      let settled = false;
+      const finish = (text: string) => {
+        if (settled) return;
+        settled = true;
+        resolve(text);
+      };
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: { results: { 0: { 0: { transcript: string } } } }) => {
+        finish(event.results[0][0].transcript);
+      };
+      recognition.onerror = () => finish("(no response detected)");
+      recognition.onend = () => finish("(no response detected)");
+
+      recognition.start();
+      setTimeout(() => {
+        try { recognition.stop(); } catch { /* already stopped */ }
+      }, 8000);
+    });
+  }, []);
+
+  const triggerVoice = useCallback(async () => {
+    if (voiceCooldown.current) return;
+    voiceCooldown.current = true;
+
+    setVoiceStatus("speaking");
+    setVoiceTranscript("");
+
+    await playTTS("Do you need assistance?");
+
+    setVoiceStatus("listening");
+    const transcript = await listenSTT();
+    setVoiceTranscript(transcript);
+
+    const t = transcript.toLowerCase();
+    const needsHelp =
+      t.includes("no response") ||
+      t.includes("yes") ||
+      t.includes("help") ||
+      t.includes("please") ||
+      t.includes("hurt") ||
+      t.includes("pain") ||
+      t.includes("stuck");
+
+    setVoiceStatus("responding");
+    if (needsHelp) {
+      await playTTS(
+        "Stay calm. Help is on the way. Emergency response has been notified of your location.",
+      );
+    } else {
+      await playTTS("Understood. Stay safe. Flagging your position for the rescue team.");
+    }
+
+    setVoiceStatus("done");
+
+    setTimeout(() => {
+      voiceCooldown.current = false;
+    }, 15000);
+  }, [playTTS, listenSTT]);
+
+  // --- Handle CV detections → injury pins + voice ---
   useEffect(() => {
     if (!cameraOn || !backend.detections.length) return;
 
@@ -92,22 +210,35 @@ export default function Home() {
 
     lastDetectionTime.current = now;
     const pos = robotPosRef.current;
+    const dir = robotDirRef.current;
+    const dirOffset: Record<string, [number, number]> = {
+      n: [0, -2], s: [0, 2], e: [2, 0], w: [-2, 0],
+    };
+    const [offX, offY] = dirOffset[dir] ?? [0, -2];
+    const pinX = Math.max(0, Math.min(COLS - 1, pos.x + offX));
+    const pinY = Math.max(0, Math.min(ROWS - 1, pos.y + offY));
+
     const cellW = (AREA.east - AREA.west) / COLS;
     const cellH = (AREA.north - AREA.south) / ROWS;
-    const lat = AREA.north - (pos.y + 0.5) * cellH;
-    const lng = AREA.west + (pos.x + 0.5) * cellW;
+    const lat = AREA.north - (pinY + 0.5) * cellH;
+    const lng = AREA.west + (pinX + 0.5) * cellW;
+
+    let isNewPin = false;
 
     setInjuries((prev) => {
       const existing = prev.find(
-        (p) => Math.abs(p.gridX - pos.x) <= 1 && Math.abs(p.gridY - pos.y) <= 1,
+        (p) =>
+          Math.abs(p.gridX - pinX) <= 1 && Math.abs(p.gridY - pinY) <= 1,
       );
       if (existing) {
+        if (injured.length <= existing.count) return prev;
         return prev.map((p) =>
           p.id === existing.id
-            ? { ...p, count: p.count + injured.length, timestamp: now }
+            ? { ...p, count: injured.length, timestamp: now }
             : p,
         );
       }
+      isNewPin = true;
       pinIdCounter++;
       return [
         ...prev,
@@ -115,16 +246,17 @@ export default function Home() {
           id: `injury-${pinIdCounter}`,
           lat,
           lng,
-          gridX: pos.x,
-          gridY: pos.y,
+          gridX: pinX,
+          gridY: pinY,
           count: injured.length,
           timestamp: now,
         },
       ];
     });
+
   }, [backend.detections, cameraOn]);
 
-  // --- Keyboard controls (fallback when robot offline) ---
+  // --- Keyboard controls ---
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
@@ -147,6 +279,12 @@ export default function Home() {
       if (!dir) return;
 
       e.preventDefault();
+
+      // Track direction
+      if (dir[1] < 0) setRobotDir("n");
+      else if (dir[1] > 0) setRobotDir("s");
+      else if (dir[0] > 0) setRobotDir("e");
+      else if (dir[0] < 0) setRobotDir("w");
 
       if (backend.robotConnected) {
         const cmds: Record<string, string> = {
@@ -187,10 +325,13 @@ export default function Home() {
 
   const reset = () => {
     setGrid(initGrid());
-    setRobotPos({ x: 3, y: 2 });
+    setRobotPos({ x: 5, y: 5 });
+    setRobotDir("n");
     setInjuries([]);
     setSelectedPin(null);
     setPanelOpen(false);
+    setVoiceStatus("idle");
+    setVoiceTranscript("");
   };
 
   const handlePinClick = (id: string) => {
@@ -251,15 +392,12 @@ export default function Home() {
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
         {/* Map panel */}
-        <div
-          className={`p-3 border-r border-border transition-all duration-300 ${
-            panelOpen ? "w-[45%]" : "w-[60%]"
-          }`}
-        >
+        <div className="w-[60%] p-3 border-r border-border">
           <div className="h-full rounded-lg overflow-hidden border border-border relative">
             <SearchMap
               grid={grid}
               robotPos={robotPos}
+              robotDir={robotDir}
               rows={ROWS}
               cols={COLS}
               injuries={injuries}
@@ -270,15 +408,88 @@ export default function Home() {
                 Forest Search Zone — Temescal Canyon
               </span>
             </div>
+
+            {/* Injury log overlay inside the map */}
+            {panelOpen && (
+              <div className="absolute top-3 right-3 z-[1000] w-64 max-h-[calc(100%-24px)] bg-panel/95 backdrop-blur-sm rounded-lg border border-border flex flex-col shadow-lg shadow-black/40">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+                  <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest">
+                    Injury Log
+                  </span>
+                  <button
+                    onClick={() => {
+                      setPanelOpen(false);
+                      setSelectedPin(null);
+                    }}
+                    className="text-foreground/40 hover:text-foreground text-[10px] cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
+                  {injuries.length === 0 ? (
+                    <div className="text-center text-[10px] text-foreground/30 py-6">
+                      No injuries detected yet.
+                    </div>
+                  ) : (
+                    injuries.map((pin) => (
+                      <div
+                        key={pin.id}
+                        onClick={() => setSelectedPin(pin.id)}
+                        className={`px-2.5 py-2 rounded border cursor-pointer transition-colors ${
+                          selectedPin === pin.id
+                            ? "border-red-500/60 bg-red-500/15"
+                            : "border-white/5 hover:border-red-500/30 hover:bg-red-500/5"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px] text-red-400 font-bold">
+                            INJURED{pin.count > 1 ? ` ×${pin.count}` : ""}
+                          </span>
+                          <span className="text-[9px] text-foreground/40">
+                            {new Date(pin.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-foreground/50">
+                          ({pin.gridX}, {pin.gridY}) — {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            triggerVoice();
+                          }}
+                          disabled={voiceStatus !== "idle" && voiceStatus !== "done"}
+                          className="mt-1.5 w-full flex items-center justify-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider rounded border border-accent/40 text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {voiceStatus === "speaking" || voiceStatus === "responding" ? (
+                            <span className="animate-pulse">Speaking...</span>
+                          ) : voiceStatus === "listening" ? (
+                            <span className="animate-pulse">Listening...</span>
+                          ) : (
+                            <>🔊 Hail</>
+                          )}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="px-3 py-2 border-t border-border shrink-0 flex items-center justify-between text-[10px]">
+                  <span className="text-foreground/40">
+                    {injuries.length} location{injuries.length !== 1 ? "s" : ""}
+                  </span>
+                  <span className="text-red-400 font-bold">
+                    {totalInjured} injured
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Camera + Stats panel */}
-        <div
-          className={`flex flex-col p-3 gap-3 transition-all duration-300 ${
-            panelOpen ? "w-[30%]" : "w-[40%]"
-          }`}
-        >
+        <div className="w-[40%] flex flex-col p-3 gap-3">
           <div className="flex-1 min-h-0">
             {cameraOn ? (
               <VideoFeed
@@ -297,8 +508,14 @@ export default function Home() {
           </div>
 
           <div className="shrink-0 space-y-2">
+            <NewsAlert />
+
             <div className="flex gap-2">
-              <Stat label="Cleared" value={`${pct}%`} accent="text-emerald-400" />
+              <Stat
+                label="Cleared"
+                value={`${pct}%`}
+                accent="text-emerald-400"
+              />
               <Stat
                 label="Scanned"
                 value={`${cleared}/${ACTIVE_CELLS}`}
@@ -315,6 +532,82 @@ export default function Home() {
                 accent="text-amber-400"
               />
             </div>
+
+            {/* Voice interaction panel */}
+            {voiceStatus !== "idle" && (
+              <div className="px-3 py-2.5 rounded border border-border bg-panel space-y-1.5">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-accent">🔊</span>
+                  <span className="text-foreground/60 uppercase tracking-wider text-[10px]">
+                    Voice Assistant
+                  </span>
+                </div>
+                <div className="text-xs text-foreground/80">
+                  🤖 &quot;Do you need assistance?&quot;
+                </div>
+                {voiceStatus === "speaking" && (
+                  <div className="text-[10px] text-amber-400 animate-pulse">
+                    Speaking...
+                  </div>
+                )}
+                {voiceStatus === "listening" && (
+                  <div className="text-[10px] text-cyan-400 animate-pulse">
+                    🎤 Listening...
+                  </div>
+                )}
+                {(voiceStatus === "responding" || voiceStatus === "done") &&
+                  voiceTranscript && (
+                    <>
+                      <div className="text-xs text-emerald-300">
+                        💬 &quot;{voiceTranscript}&quot;
+                      </div>
+                      {(() => {
+                        const t = voiceTranscript.toLowerCase();
+                        const needsHelp =
+                          t.includes("no response") ||
+                          t.includes("yes") ||
+                          t.includes("help") ||
+                          t.includes("please") ||
+                          t.includes("hurt") ||
+                          t.includes("pain") ||
+                          t.includes("stuck");
+                        const replyText = needsHelp
+                          ? "Stay calm. Help is on the way. Emergency response has been notified of your location."
+                          : "Understood. Stay safe. Flagging your position for the rescue team.";
+                        return (
+                          <>
+                            <div className="text-xs text-foreground/80">
+                              🤖 &quot;{replyText}&quot;
+                            </div>
+                            {voiceStatus === "responding" && (
+                              <div className="text-[10px] text-amber-400 animate-pulse">
+                                Speaking...
+                              </div>
+                            )}
+                            {voiceStatus === "done" && needsHelp && (
+                              <div className="mt-1 px-2.5 py-2 rounded bg-red-600/20 border border-red-500/50 text-[10px] text-red-300 space-y-1">
+                                <div className="font-bold uppercase tracking-wider text-red-400">
+                                  ⚠ Emergency Response Recommended
+                                </div>
+                                <div className="text-red-300/80">
+                                  Person requires immediate assistance. Dispatch
+                                  emergency personnel to this location.
+                                </div>
+                              </div>
+                            )}
+                            {voiceStatus === "done" && !needsHelp && (
+                              <div className="mt-1 px-2.5 py-2 rounded bg-emerald-600/10 border border-emerald-500/30 text-[10px] text-emerald-400">
+                                Person declined assistance — no action needed.
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+              </div>
+            )}
+
             {!backend.robotConnected && (
               <div className="px-3 py-2 rounded border border-border bg-panel text-[10px] text-foreground/40 text-center uppercase tracking-wider">
                 Use W A S D or arrow keys to move the robot
@@ -322,82 +615,6 @@ export default function Home() {
             )}
           </div>
         </div>
-
-        {/* Injury log panel (slides in on pin click) */}
-        {panelOpen && (
-          <div className="w-[25%] border-l border-border bg-panel flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-xs font-mono text-red-400 uppercase tracking-widest">
-                Injury Log
-              </span>
-              <button
-                onClick={() => {
-                  setPanelOpen(false);
-                  setSelectedPin(null);
-                }}
-                className="text-foreground/40 hover:text-foreground text-xs cursor-pointer"
-              >
-                ✕ CLOSE
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {injuries.length === 0 ? (
-                <div className="text-center text-xs text-foreground/30 py-8">
-                  No injuries detected yet.
-                  <br />
-                  Pins appear when the CV model detects injured persons.
-                </div>
-              ) : (
-                injuries.map((pin) => (
-                  <div
-                    key={pin.id}
-                    onClick={() => setSelectedPin(pin.id)}
-                    className={`px-3 py-2.5 rounded border cursor-pointer transition-colors ${
-                      selectedPin === pin.id
-                        ? "border-red-500/60 bg-red-500/15"
-                        : "border-border hover:border-red-500/30 hover:bg-red-500/5"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-red-400 font-bold">
-                        ⚠ INJURED PERSON{pin.count > 1 ? "S" : ""}
-                      </span>
-                      <span className="text-[10px] text-foreground/40">
-                        {new Date(pin.timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-foreground/50 space-y-0.5">
-                      <div>
-                        Count:{" "}
-                        <span className="text-red-300">{pin.count}</span>
-                      </div>
-                      <div>
-                        Grid: ({pin.gridX}, {pin.gridY})
-                      </div>
-                      <div>
-                        Coords: {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="px-4 py-3 border-t border-border">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-foreground/40">Total Injured</span>
-                <span className="text-red-400 font-bold">{totalInjured}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs mt-1">
-                <span className="text-foreground/40">Locations</span>
-                <span className="text-amber-400 font-bold">
-                  {injuries.length}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

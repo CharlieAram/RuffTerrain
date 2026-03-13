@@ -30,6 +30,22 @@ export default function VideoFeed({
 
   return (
     <div className="relative h-full bg-panel rounded-lg border border-border overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+        <span className="text-xs font-mono text-accent uppercase tracking-widest">
+          {sourceLabel} — CV MODEL{" "}
+          {backendConnected ? "Active" : "Disconnected"}
+        </span>
+        <span
+          className={`text-xs font-mono ${detections.length > 0 ? "text-amber-400" : "text-foreground/50"
+            }`}
+        >
+          {detections.length > 0
+            ? `● ${detections.length} DETECTED`
+            : "○ SCANNING"}
+        </span>
+      </div>
+
+
       <div className="relative flex-1 bg-black overflow-hidden">
         {frame ? (
           <img

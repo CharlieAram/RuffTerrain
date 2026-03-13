@@ -1,66 +1,65 @@
-export const ROWS = 12;
-export const COLS = 12;
+export const ROWS = 14;
+export const COLS = 14;
 
-// Small forest clearing near Temescal Canyon, Pacific Palisades (~65 m × 60 m)
+// Property lot bounded by West Sunset Blvd (S), El Medio Ave (E),
+// and lot boundaries (N/W) — Pacific Palisades
 export const AREA = {
-  north: 34.04930,
-  south: 34.04870,
-  west: -118.53430,
-  east: -118.53360,
+  north: 34.04940,
+  south: 34.04850,
+  west: -118.53440,
+  east: -118.53325,
 };
 
-// Trail / fire-road paths through the search area (drawn as map polylines)
+// Road center-lines drawn as polylines
 export const TRAILS: [number, number][][] = [
-  // Main fire road — NW to SE diagonal
+  // West Sunset Boulevard
   [
-    [34.04925, -118.53425],
-    [34.04918, -118.53412],
-    [34.04908, -118.53398],
-    [34.04898, -118.53388],
-    [34.04888, -118.53378],
-    [34.04878, -118.53370],
+    [34.04870, -118.53445],
+    [34.04869, -118.53420],
+    [34.04868, -118.53400],
+    [34.04867, -118.53380],
+    [34.04866, -118.53360],
+    [34.04866, -118.53340],
+    [34.04867, -118.53320],
   ],
-  // Cross trail — SW to NE
+  // El Medio Avenue
   [
-    [34.04878, -118.53420],
-    [34.04888, -118.53408],
-    [34.04898, -118.53398],
-    [34.04910, -118.53386],
-    [34.04920, -118.53375],
-    [34.04928, -118.53365],
+    [34.04866, -118.53340],
+    [34.04885, -118.53341],
+    [34.04905, -118.53342],
+    [34.04925, -118.53344],
+    [34.04945, -118.53346],
+  ],
+  // Internal driveway
+  [
+    [34.04868, -118.53410],
+    [34.04885, -118.53400],
+    [34.04900, -118.53395],
+    [34.04915, -118.53392],
   ],
 ];
 
-// Search perimeter aligned with trail corridor (irregular to follow terrain)
+// 6-vertex perimeter aligned to the actual CartoDB tile roads:
+//   1→2  S:  West Sunset Blvd
+//   2→3  SE: lower El Medio Ave
+//   3→4  E:  upper El Medio Ave
+//   4→5  N:  back property line
+//   5→6  NW: lot boundary diagonal
+//   6→1  W:  western lot line
 export const SEARCH_ZONE: [number, number][] = [
-  // NW edge — tree line above main road
-  [34.04927, -118.53428],
-  [34.04928, -118.53412],
-  [34.04929, -118.53398],
-  // N edge — clearing boundary
-  [34.04927, -118.53385],
-  [34.04925, -118.53372],
-  // NE corner
-  [34.04920, -118.53364],
-  [34.04912, -118.53362],
-  // E edge — canyon rim
-  [34.04902, -118.53363],
-  [34.04892, -118.53362],
-  [34.04882, -118.53364],
-  // SE corner
-  [34.04875, -118.53368],
-  [34.04873, -118.53378],
-  // S edge — drainage line
-  [34.04872, -118.53392],
-  [34.04874, -118.53406],
-  // SW corner
-  [34.04876, -118.53418],
-  [34.04880, -118.53426],
-  // W edge — ridge line
-  [34.04890, -118.53429],
-  [34.04900, -118.53430],
-  [34.04912, -118.53430],
-  [34.04922, -118.53429],
+  [34.04868, -118.53430], // 1 SW — Sunset Blvd at west lot line
+  [34.04866, -118.53340], // 2 SE — Sunset / El Medio intersection
+  [34.04905, -118.53342], // 3 E  — El Medio midway
+  [34.04935, -118.53345], // 4 NE — El Medio north / property corner
+  [34.04935, -118.53395], // 5 N  — back property line
+  [34.04915, -118.53430], // 6 NW — lot boundary meets west edge
+];
+
+// Cells pre-cleared for demo (robot searched along the driveway)
+export const DEMO_CLEARED: [number, number][] = [
+  [4, 11], [4, 10], [5, 10],
+  [5, 9], [5, 8], [5, 7],
+  [5, 6], [6, 6], [6, 5], [6, 4],
 ];
 
 function pointInPolygon(

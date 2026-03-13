@@ -168,10 +168,6 @@ def process_frame(
                 "confidence": float(conf),
             })
 
-    ok_count = sum(1 for d in detections if d["label"] == "OK")
-    injured_count = sum(1 for d in detections if d["label"] == "INJURED")
-    draw_status_bar(frame, ok_count, injured_count)
-
     return frame, detections
 
 

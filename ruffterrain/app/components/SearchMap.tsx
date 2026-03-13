@@ -4,7 +4,6 @@ import {
   MapContainer,
   TileLayer,
   Rectangle,
-  CircleMarker,
   Polygon,
   Polyline,
   Marker,
@@ -29,6 +28,7 @@ export interface InjuryPin {
 interface Props {
   grid: CellState[][];
   robotPos: { x: number; y: number };
+  robotDir: "n" | "s" | "e" | "w";
   rows: number;
   cols: number;
   injuries: InjuryPin[];
@@ -51,6 +51,43 @@ const CELL_STYLE: Record<CellState, PathOptions> = {
   },
 };
 
+const DIR_ROTATION = { n: 0, e: 90, s: 180, w: 270 } as const;
+
+function makeRobotIcon(dir: "n" | "s" | "e" | "w") {
+  const rot = DIR_ROTATION[dir];
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:44px;height:44px;position:relative;
+      transform:rotate(${rot}deg);
+    ">
+      <div style="
+        position:absolute;inset:4px;border-radius:50%;
+        background:radial-gradient(circle,rgba(34,211,238,0.35) 0%,transparent 70%);
+        animation:pulse-glow 1.5s ease-in-out infinite;
+      "></div>
+      <div style="
+        position:absolute;top:50%;left:50%;
+        transform:translate(-50%,-50%);
+        width:18px;height:18px;
+        background:#22d3ee;border:2.5px solid #fff;border-radius:50%;
+        box-shadow:0 0 16px rgba(34,211,238,0.8);
+      "></div>
+      <div style="
+        position:absolute;top:3px;left:50%;
+        transform:translateX(-50%);
+        width:0;height:0;
+        border-left:7px solid transparent;
+        border-right:7px solid transparent;
+        border-bottom:12px solid #22d3ee;
+        filter:drop-shadow(0 0 4px rgba(34,211,238,0.6));
+      "></div>
+    </div>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  });
+}
+
 const injuryIcon = L.divIcon({
   className: "",
   html: `<div style="
@@ -69,6 +106,7 @@ const injuryIcon = L.divIcon({
 export default function SearchMap({
   grid,
   robotPos,
+  robotDir,
   rows,
   cols,
   injuries,
@@ -78,7 +116,7 @@ export default function SearchMap({
   const cellH = (AREA.north - AREA.south) / rows;
 
   const center: [number, number] = [
-    (AREA.north + AREA.south) / 2,
+    (AREA.north + AREA.south) / 2 - 4.5 * cellH,
     (AREA.east + AREA.west) / 2,
   ];
 
@@ -86,6 +124,8 @@ export default function SearchMap({
     AREA.north - (robotPos.y + 0.5) * cellH,
     AREA.west + (robotPos.x + 0.5) * cellW,
   ];
+
+  const robotIcon = makeRobotIcon(robotDir);
 
   return (
     <MapContainer
@@ -114,15 +154,14 @@ export default function SearchMap({
         />
       ))}
 
-      {/* Search zone perimeter */}
+      {/* Search zone perimeter — solid line */}
       <Polygon
         positions={SEARCH_ZONE}
         pathOptions={{
           color: "#f97316",
-          weight: 2,
+          weight: 2.5,
           fill: false,
-          opacity: 0.7,
-          dashArray: "8 4",
+          opacity: 0.85,
         }}
       />
 
@@ -154,16 +193,11 @@ export default function SearchMap({
         />
       ))}
 
-      {/* Robot marker */}
-      <CircleMarker
-        center={robotLatLng}
-        radius={8}
-        pathOptions={{
-          color: "#22d3ee",
-          fillColor: "#22d3ee",
-          fillOpacity: 0.9,
-          weight: 3,
-        }}
+      {/* Robot marker with direction arrow */}
+      <Marker
+        position={robotLatLng}
+        icon={robotIcon}
+        zIndexOffset={1000}
       />
     </MapContainer>
   );
