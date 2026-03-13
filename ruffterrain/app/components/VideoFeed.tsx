@@ -111,7 +111,8 @@ export default function VideoFeed({ onDetection }: Props) {
           const sw = bw * scaleX;
           const sh = bh * scaleY;
 
-          const injured = bw / bh > 0.95;
+          // Person must be clearly horizontal (lying down) to flag as potentially injured
+          const injured = bw / bh > 1.5;
 
           detections.push({
             confidence: pred.score,
@@ -140,9 +141,9 @@ export default function VideoFeed({ onDetection }: Props) {
   }, [modelStatus, hasCamera]);
 
   return (
-    <div className="relative h-full bg-white rounded-xl border border-border overflow-hidden flex flex-col shadow-sm">
+    <div className="relative h-full bg-panel rounded-lg border border-border overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <span className="text-[10px] font-mono text-accent uppercase tracking-widest">
+        <span className="text-xs font-mono text-accent uppercase tracking-widest">
           Camera — CV{" "}
           {modelStatus === "ready"
             ? "Active"
@@ -151,8 +152,8 @@ export default function VideoFeed({ onDetection }: Props) {
               : "Error"}
         </span>
         <span
-          className={`text-[10px] font-mono ${
-            detectionCount > 0 ? "text-amber-600" : "text-foreground/30"
+          className={`text-xs font-mono ${
+            detectionCount > 0 ? "text-amber-400" : "text-foreground/50"
           }`}
         >
           {detectionCount > 0
@@ -161,7 +162,7 @@ export default function VideoFeed({ onDetection }: Props) {
         </span>
       </div>
 
-      <div className="relative flex-1 bg-zinc-900 overflow-hidden">
+      <div className="relative flex-1 bg-black overflow-hidden">
         <video
           ref={videoRef}
           autoPlay
@@ -172,7 +173,7 @@ export default function VideoFeed({ onDetection }: Props) {
 
         {!hasCamera && (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="text-xs font-mono text-zinc-500">
+            <span className="text-sm font-mono text-zinc-500">
               AWAITING CAMERA FEED
             </span>
           </div>
@@ -185,7 +186,7 @@ export default function VideoFeed({ onDetection }: Props) {
 
         {modelStatus === "loading" && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-            <span className="text-xs font-mono text-cyan-300 animate-pulse">
+            <span className="text-sm font-mono text-cyan-300 animate-pulse">
               Loading CV Model&hellip;
             </span>
           </div>
@@ -197,8 +198,8 @@ export default function VideoFeed({ onDetection }: Props) {
         />
 
         {hasInjured && (
-          <div className="absolute bottom-0 inset-x-0 px-4 py-1.5 bg-red-600/90 text-white text-[10px] font-mono text-center uppercase tracking-wider animate-pulse">
-            ⚠ Injured Person Detected
+          <div className="absolute bottom-0 inset-x-0 px-4 py-2 bg-red-600/90 text-white text-xs font-mono text-center uppercase tracking-wider animate-pulse">
+            ⚠ Potentially Injured Person Detected
           </div>
         )}
       </div>
@@ -224,7 +225,7 @@ function drawDetectionBox(
 
   ctx.setLineDash([]);
   ctx.lineWidth = 2.5;
-  const bLen = Math.min(14, w * 0.2, h * 0.2);
+  const bLen = Math.min(16, w * 0.2, h * 0.2);
   const corners: [number, number, number, number][] = [
     [x, y, 1, 1],
     [x + w, y, -1, 1],
@@ -239,11 +240,13 @@ function drawDetectionBox(
     ctx.stroke();
   }
 
-  const label = `${injured ? "INJURED" : "OK"} ${(score * 100).toFixed(0)}%`;
-  ctx.font = "bold 10px monospace";
+  const label = injured
+    ? `POTENTIALLY INJURED ${(score * 100).toFixed(0)}%`
+    : `OK ${(score * 100).toFixed(0)}%`;
+  ctx.font = "bold 11px monospace";
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = color + "cc";
-  ctx.fillRect(x, y - 18, tw + 10, 16);
+  ctx.fillRect(x, y - 20, tw + 12, 18);
   ctx.fillStyle = "#fff";
-  ctx.fillText(label, x + 5, y - 6);
+  ctx.fillText(label, x + 6, y - 6);
 }
