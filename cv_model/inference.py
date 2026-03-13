@@ -29,20 +29,22 @@ COLOR_MAP = {0: (0, 200, 0), 1: (0, 0, 255)}  # BGR
 
 def extract_features(keypoints: np.ndarray) -> np.ndarray:
     """
-    Extract geometric features from a (17, 2) or (17, 3) keypoint array.
+    Extract 11 geometric features from a (17, 2) or (17, 3) keypoint array.
     Must stay in sync with the training notebook.
     """
     kps = np.array(keypoints)
     if kps.shape[-1] == 3:
         kps = kps[:, :2]
 
+    nose = kps[0]
     l_shoulder, r_shoulder = kps[5], kps[6]
     l_hip, r_hip = kps[11], kps[12]
+    l_knee, r_knee = kps[13], kps[14]
     l_ankle, r_ankle = kps[15], kps[16]
-    nose = kps[0]
 
     mid_shoulder = (l_shoulder + r_shoulder) / 2
     mid_hip = (l_hip + r_hip) / 2
+    mid_knee = (l_knee + r_knee) / 2
     mid_ankle = (l_ankle + r_ankle) / 2
 
     x_min, y_min = kps.min(axis=0)
@@ -51,18 +53,20 @@ def extract_features(keypoints: np.ndarray) -> np.ndarray:
     bbox_h = max(y_max - y_min, 1)
 
     aspect_ratio = bbox_h / bbox_w
-
     torso_vec = mid_hip - mid_shoulder
     torso_angle = np.arctan2(torso_vec[0], torso_vec[1])
-
     body_vec = mid_ankle - nose
     body_angle = np.arctan2(body_vec[0], body_vec[1])
-
     span_ratio = bbox_h / bbox_w if bbox_w > 0 else 0
     nose_hip_vert = abs(nose[1] - mid_hip[1]) / bbox_h
     shoulder_ankle_vert = abs(mid_shoulder[1] - mid_ankle[1]) / bbox_h
     horiz_spread = bbox_w / bbox_h if bbox_h > 0 else 0
     y_variance = np.std(kps[:, 1]) / bbox_h if bbox_h > 0 else 0
+    leg_vec = mid_ankle - mid_hip
+    leg_angle = np.arctan2(leg_vec[0], leg_vec[1])
+    body_center_y = (y_min + y_max) / 2
+    head_relative = (body_center_y - nose[1]) / bbox_h
+    knee_ankle_vert = abs(mid_knee[1] - mid_ankle[1]) / bbox_h
 
     return np.array([
         aspect_ratio,
@@ -73,6 +77,9 @@ def extract_features(keypoints: np.ndarray) -> np.ndarray:
         shoulder_ankle_vert,
         horiz_spread,
         y_variance,
+        abs(leg_angle),
+        head_relative,
+        knee_ankle_vert,
     ])
 
 

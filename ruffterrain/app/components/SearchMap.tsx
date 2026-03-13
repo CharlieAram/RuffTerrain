@@ -15,10 +15,10 @@ interface Props {
 }
 
 const CELL_STYLE: Record<CellState, PathOptions> = {
-  danger: { color: "#7f1d1d", fillColor: "#dc2626", fillOpacity: 0.3, weight: 0.5 },
-  clear: { color: "#14532d", fillColor: "#22c55e", fillOpacity: 0.25, weight: 0.5 },
-  "person-injured": { color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.55, weight: 1.5 },
-  "person-ok": { color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.45, weight: 1.5 },
+  danger: { color: "transparent", fillColor: "#dc2626", fillOpacity: 0.20, weight: 0 },
+  clear: { color: "transparent", fillColor: "#22c55e", fillOpacity: 0.12, weight: 0 },
+  "person-injured": { color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.50, weight: 1.5 },
+  "person-ok": { color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.40, weight: 1.5 },
 };
 
 export default function SearchMap({ grid, robotPos, rows, cols }: Props) {
@@ -49,11 +49,10 @@ export default function SearchMap({ grid, robotPos, rows, cols }: Props) {
       <Polygon
         positions={SEARCH_ZONE}
         pathOptions={{
-          color: "#f87171",
-          weight: 2,
+          color: "#f97316",
+          weight: 2.5,
           fill: false,
-          dashArray: "10,5",
-          opacity: 0.8,
+          opacity: 0.85,
         }}
       />
 

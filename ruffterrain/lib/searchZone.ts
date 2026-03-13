@@ -1,5 +1,5 @@
-export const ROWS = 10;
-export const COLS = 16;
+export const ROWS = 20;
+export const COLS = 32;
 
 export const AREA = {
   north: 34.068,
@@ -8,20 +8,61 @@ export const AREA = {
   east: -118.528,
 };
 
-// Irregular polygon representing the wildfire search perimeter
+// Irregular polygon tracing the woodland / wildfire search perimeter
+// across Pacific Palisades hill terrain — ridgelines, canyons, and
+// the wildland-urban interface along the southern edge.
 export const SEARCH_ZONE: [number, number][] = [
-  [34.064, -118.582],
-  [34.067, -118.568],
-  [34.066, -118.550],
-  [34.063, -118.538],
-  [34.056, -118.531],
-  [34.046, -118.530],
-  [34.038, -118.536],
-  [34.034, -118.548],
-  [34.033, -118.565],
-  [34.036, -118.576],
-  [34.043, -118.584],
-  [34.055, -118.586],
+  // Northern ridgeline — jagged peaks and saddles (west → east)
+  [34.0648, -118.5852],
+  [34.0672, -118.5810],
+  [34.0650, -118.5772],
+  [34.0678, -118.5728],
+  [34.0655, -118.5685],
+  [34.0676, -118.5642],
+  [34.0662, -118.5598],
+  [34.0680, -118.5552],
+  [34.0665, -118.5508],
+  [34.0672, -118.5462],
+  [34.0652, -118.5420],
+  [34.0638, -118.5378],
+
+  // Northeast descent into canyons
+  [34.0615, -118.5348],
+  [34.0588, -118.5332],
+  [34.0570, -118.5350],
+  [34.0548, -118.5322],
+  [34.0522, -118.5308],
+
+  // East edge — irregular canyon mouths
+  [34.0490, -118.5312],
+  [34.0458, -118.5328],
+  [34.0430, -118.5345],
+
+  // South — wildland-urban interface
+  [34.0402, -118.5370],
+  [34.0388, -118.5405],
+  [34.0370, -118.5438],
+  [34.0380, -118.5465],
+  [34.0355, -118.5498],
+  [34.0342, -118.5535],
+  [34.0335, -118.5572],
+  [34.0340, -118.5618],
+  [34.0335, -118.5655],
+  [34.0350, -118.5690],
+
+  // Southwest — canyon country
+  [34.0368, -118.5722],
+  [34.0390, -118.5758],
+  [34.0410, -118.5788],
+
+  // West edge — moderately irregular
+  [34.0442, -118.5812],
+  [34.0478, -118.5830],
+  [34.0510, -118.5845],
+  [34.0545, -118.5858],
+  [34.0575, -118.5865],
+  [34.0608, -118.5868],
+  [34.0632, -118.5862],
 ];
 
 function pointInPolygon(lat: number, lng: number, poly: [number, number][]): boolean {

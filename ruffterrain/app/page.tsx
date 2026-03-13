@@ -9,11 +9,11 @@ import { ROWS, COLS, CELL_MASK, ACTIVE_CELLS } from "@/lib/searchZone";
 const SearchMap = dynamic(() => import("./components/SearchMap"), { ssr: false });
 
 const DEMO_PEOPLE = [
-  { x: 5, y: 2, injured: true },
-  { x: 12, y: 3, injured: false },
-  { x: 8, y: 5, injured: true },
-  { x: 5, y: 7, injured: false },
-  { x: 11, y: 7, injured: true },
+  { x: 10, y: 4, injured: true },
+  { x: 24, y: 6, injured: false },
+  { x: 16, y: 10, injured: true },
+  { x: 10, y: 14, injured: false },
+  { x: 22, y: 14, injured: true },
 ];
 
 function initGrid(): CellState[][] {
@@ -24,7 +24,7 @@ function initGrid(): CellState[][] {
 
 export default function Home() {
   const [grid, setGrid] = useState(initGrid);
-  const [robotPos, setRobotPos] = useState({ x: 7, y: 4 });
+  const [robotPos, setRobotPos] = useState({ x: 14, y: 8 });
   const [demoMode, setDemoMode] = useState(false);
   const demoDir = useRef(1);
   const robotPosRef = useRef(robotPos);
@@ -35,8 +35,8 @@ export default function Home() {
     (cx: number, cy: number) => {
       setGrid((prev) => {
         const next = prev.map((r) => [...r]);
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
             const nx = cx + dx;
             const ny = cy + dy;
             if (
@@ -149,7 +149,7 @@ export default function Home() {
         }
         return { x: nx, y: ny };
       });
-    }, 120);
+    }, 80);
     return () => clearInterval(interval);
   }, [demoMode]);
 
@@ -163,7 +163,7 @@ export default function Home() {
   const reset = () => {
     setDemoMode(false);
     setGrid(initGrid());
-    setRobotPos({ x: 7, y: 4 });
+    setRobotPos({ x: 14, y: 8 });
     demoDir.current = 1;
   };
 
