@@ -202,6 +202,9 @@ DUMMY_NEWS = {
 }
 
 
+SGAI_BASE_URL = "https://sgai-api-v2.onrender.com"
+
+
 @app.get("/api/news")
 async def news_endpoint():
     api_key = os.getenv("SCRAPEGRAPH_API_KEY", "")
@@ -210,38 +213,48 @@ async def news_endpoint():
         return DUMMY_NEWS
 
     try:
-        from scrapegraph_py import Client
+        import httpx
 
-        client = Client(api_key=api_key)
-        response = client.smartscraper(
-            website_url="https://www.fire.ca.gov/incidents",
-            user_prompt=(
-                "Extract the most recent and urgent wildfire incident. "
-                "Return a JSON object with keys: headline (string, short title), "
-                "summary (string, 1-2 sentence description of the situation), "
-                "severity (string, one of: critical, high, moderate, low)."
-            ),
-        )
-        client.close()
+        headers = {
+            "SGAI-APIKEY": api_key,
+            "Content-Type": "application/json",
+        }
 
-        if response and isinstance(response, dict) and response.get("result"):
-            result = response["result"]
-            if isinstance(result, str):
-                import ast
-                try:
-                    result = ast.literal_eval(result)
-                except Exception:
-                    result = json.loads(result)
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{SGAI_BASE_URL}/api/v1/extract",
+                headers=headers,
+                json={
+                    "url": "https://www.fire.ca.gov/incidents",
+                    "prompt": (
+                        "Extract the most recent and urgent wildfire incident. "
+                        "Return the headline, a 1-2 sentence summary, and "
+                        "severity (critical, high, moderate, or low)."
+                    ),
+                    "schema": {
+                        "headline": "string",
+                        "summary": "string",
+                        "severity": "string",
+                    },
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
+        result = data.get("json") or data.get("result") or {}
+        if isinstance(result, str):
+            result = json.loads(result)
+
+        if result and result.get("headline"):
             return {
-                "headline": result.get("headline", DUMMY_NEWS["headline"]),
+                "headline": result["headline"],
                 "summary": result.get("summary", DUMMY_NEWS["summary"]),
                 "severity": result.get("severity", "high"),
                 "source": "scrapegraph",
                 "search_zone_expanded": True,
             }
 
-        print("[news] ScrapeGraph returned empty — using dummy data")
+        print("[news] ScrapeGraph extract returned empty — using dummy data")
         return DUMMY_NEWS
 
     except Exception as e:
@@ -313,6 +326,18 @@ async def ws_endpoint(ws: WebSocket):
                         state.robot.rotate(yaw=15)
                     elif cmd == "right":
                         state.robot.rotate(yaw=-15)
+                    elif cmd == "approach":
+                        distance = float(msg.get("distance", 10))
+                        state.robot.client.mqtt.publish(
+                            f"cyberwave/twin/{state.robot.uuid}/command",
+                            {
+                                "source_type": "tele",
+                                "command": "move_forward",
+                                "data": {"linear_x": distance, "angular_z": 0.0},
+                                "timestamp": time.time(),
+                            },
+                        )
+                        print(f"[cmd] approach: MQTT move_forward linear_x={distance}")
                 except Exception as e:
                     print(f"[cmd] {e}")
     except WebSocketDisconnect:

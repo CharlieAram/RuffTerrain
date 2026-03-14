@@ -59,6 +59,7 @@ export default function Home() {
   const robotDirRef = useRef(robotDir);
   robotDirRef.current = robotDir;
   const lastDetectionTime = useRef(0);
+  const lastApproachTime = useRef(0);
 
   const backend = useBackend();
   const { telemetry, mqttConnected } = useCyberwave();
@@ -94,7 +95,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    clearCell(robotPos.x, robotPos.y);
+    clearCell(Math.round(robotPos.x), Math.round(robotPos.y));
   }, [robotPos, clearCell]);
 
   // --- Voice interaction: TTS + STT + response ---
@@ -204,6 +205,7 @@ export default function Home() {
 
     const now = Date.now();
     if (now - lastDetectionTime.current < 4000) return;
+    if (now - lastApproachTime.current < 5000) return;
 
     const injured = backend.detections.filter((d) => d.label === "INJURED");
     if (!injured.length) return;
@@ -300,8 +302,8 @@ export default function Home() {
         backend.sendCommand(cmds[e.key.toLowerCase()]);
       } else {
         setRobotPos((prev) => {
-          const nx = Math.max(0, Math.min(COLS - 1, prev.x + dir[0]));
-          const ny = Math.max(0, Math.min(ROWS - 1, prev.y + dir[1]));
+          const nx = Math.max(0, Math.min(COLS - 1, Math.round(prev.x) + dir[0]));
+          const ny = Math.max(0, Math.min(ROWS - 1, Math.round(prev.y) + dir[1]));
           if (!CELL_MASK[ny]?.[nx]) return prev;
           return { x: nx, y: ny };
         });
@@ -338,6 +340,24 @@ export default function Home() {
     setSelectedPin(id);
     setPanelOpen(true);
   };
+
+  const handleApproach = useCallback(() => {
+    lastApproachTime.current = Date.now();
+    backend.sendCommand("approach");
+
+    const step = 10 / CELL_SIZE_M;
+    const dirDelta: Record<string, [number, number]> = {
+      n: [0, -step], s: [0, step], e: [step, 0], w: [-step, 0],
+    };
+    const [dx, dy] = dirDelta[robotDir] ?? [0, -step];
+
+    setRobotPos((prev) => {
+      const nx = Math.max(0, Math.min(COLS - 1, prev.x + dx));
+      const ny = Math.max(0, Math.min(ROWS - 1, prev.y + dy));
+      if (!CELL_MASK[Math.round(ny)]?.[Math.round(nx)]) return prev;
+      return { x: nx, y: ny };
+    });
+  }, [robotDir, backend]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden font-mono">
@@ -454,22 +474,33 @@ export default function Home() {
                         <div className="text-[9px] text-foreground/50">
                           ({pin.gridX}, {pin.gridY}) — {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)}
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            triggerVoice();
-                          }}
-                          disabled={voiceStatus !== "idle" && voiceStatus !== "done"}
-                          className="mt-1.5 w-full flex items-center justify-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider rounded border border-accent/40 text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {voiceStatus === "speaking" || voiceStatus === "responding" ? (
-                            <span className="animate-pulse">Speaking...</span>
-                          ) : voiceStatus === "listening" ? (
-                            <span className="animate-pulse">Listening...</span>
-                          ) : (
-                            <>🔊 Hail</>
-                          )}
-                        </button>
+                        <div className="mt-1.5 flex flex-col gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleApproach();
+                            }}
+                            className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider rounded border border-emerald-400/40 text-emerald-400 hover:bg-emerald-400/10 transition-colors cursor-pointer"
+                          >
+                            ▶ Approach
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerVoice();
+                            }}
+                            disabled={voiceStatus !== "idle" && voiceStatus !== "done"}
+                            className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider rounded border border-accent/40 text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {voiceStatus === "speaking" || voiceStatus === "responding" ? (
+                              <span className="animate-pulse">Speaking...</span>
+                            ) : voiceStatus === "listening" ? (
+                              <span className="animate-pulse">Listening...</span>
+                            ) : (
+                              <>🔊 Hail</>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
